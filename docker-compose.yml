@@ -1,0 +1,97 @@
+services:
+  miniflux-db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: miniflux
+      POSTGRES_PASSWORD: ${MINIFLUX_DB_PASSWORD}
+      POSTGRES_DB: miniflux
+    volumes:
+      - miniflux_db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "miniflux"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  miniflux:
+    image: miniflux/miniflux:2.2.16
+    restart: unless-stopped
+    depends_on:
+      miniflux-db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://miniflux:${MINIFLUX_DB_PASSWORD}@miniflux-db/miniflux?sslmode=disable
+      RUN_MIGRATIONS: "1"
+      CREATE_ADMIN: "1"
+      ADMIN_USERNAME: ${MINIFLUX_ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${MINIFLUX_ADMIN_PASSWORD}
+    volumes:
+      - ./data/miniflux:/var/lib/miniflux
+
+  linkwarden-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${LINKWARDEN_POSTGRES_PASSWORD}
+    volumes:
+      - linkwarden_pg:/var/lib/postgresql/data
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12.8
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+    volumes:
+      - linkwarden_meili:/meili_data
+
+  linkwarden:
+    image: ghcr.io/linkwarden/linkwarden:v2.13.5
+    restart: unless-stopped
+    depends_on:
+      - linkwarden-db
+      - meilisearch
+    ports:
+      - "3000:3000"
+    environment:
+      NEXTAUTH_URL: ${LINKWARDEN_NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${LINKWARDEN_NEXTAUTH_SECRET}
+      DATABASE_URL: postgresql://postgres:${LINKWARDEN_POSTGRES_PASSWORD}@linkwarden-db:5432/postgres
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+    volumes:
+      - linkwarden_data:/data/data
+
+  archivebox:
+    image: archivebox/archivebox:stable
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ALLOWED_HOSTS: "*"
+      CSRF_TRUSTED_ORIGINS: ${ARCHIVEBOX_CSRF_TRUSTED_ORIGINS}
+    volumes:
+      - archivebox_data:/data
+    command: server --quick-init 0.0.0.0:8000
+
+  archivebox-webhook:
+    build: ./archivebox-webhook
+    restart: unless-stopped
+    depends_on:
+      - archivebox
+    ports:
+      - "8090:8090"
+    environment:
+      MINIFLUX_WEBHOOK_SECRET: ${MINIFLUX_WEBHOOK_SECRET}
+      ARCHIVEBOX_DATA_DIR: /archivebox-data
+    volumes:
+      - archivebox_data:/archivebox-data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  miniflux_db:
+  linkwarden_pg:
+  linkwarden_meili:
+  linkwarden_data:
+  archivebox_data:
