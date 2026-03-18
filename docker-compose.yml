@@ -20,16 +20,26 @@ services:
     depends_on:
       miniflux-db:
         condition: service_healthy
-    ports:
-      - "8080:8080"
     environment:
       DATABASE_URL: postgres://miniflux:${MINIFLUX_DB_PASSWORD}@miniflux-db/miniflux?sslmode=disable
+      BASE_URL: ${MINIFLUX_BASE_URL}
       RUN_MIGRATIONS: "1"
       CREATE_ADMIN: "1"
       ADMIN_USERNAME: ${MINIFLUX_ADMIN_USERNAME}
       ADMIN_PASSWORD: ${MINIFLUX_ADMIN_PASSWORD}
     volumes:
       - ./data/miniflux:/var/lib/miniflux
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.miniflux.rule=Host(`rss.astribelli.com`)"
+      - "traefik.http.routers.miniflux.entrypoints=websecure"
+      - "traefik.http.routers.miniflux.tls=true"
+      - "traefik.http.routers.miniflux.tls.certresolver=le"
+      - "traefik.http.services.miniflux.loadbalancer.server.port=8080"
 
   linkwarden-db:
     image: postgres:16-alpine
@@ -53,8 +63,6 @@ services:
     depends_on:
       - linkwarden-db
       - meilisearch
-    ports:
-      - "3000:3000"
     environment:
       NEXTAUTH_URL: ${LINKWARDEN_NEXTAUTH_URL}
       NEXTAUTH_SECRET: ${LINKWARDEN_NEXTAUTH_SECRET}
@@ -62,18 +70,38 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
     volumes:
       - linkwarden_data:/data/data
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.linkwarden.rule=Host(`links.astribelli.com`)"
+      - "traefik.http.routers.linkwarden.entrypoints=websecure"
+      - "traefik.http.routers.linkwarden.tls=true"
+      - "traefik.http.routers.linkwarden.tls.certresolver=le"
+      - "traefik.http.services.linkwarden.loadbalancer.server.port=3000"
 
   archivebox:
     image: archivebox/archivebox:stable
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     environment:
-      ALLOWED_HOSTS: "*"
+      ALLOWED_HOSTS: ${ARCHIVEBOX_ALLOWED_HOSTS}
       CSRF_TRUSTED_ORIGINS: ${ARCHIVEBOX_CSRF_TRUSTED_ORIGINS}
     volumes:
       - archivebox_data:/data
     command: server --quick-init 0.0.0.0:8000
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.archivebox.rule=Host(`archive.astribelli.com`)"
+      - "traefik.http.routers.archivebox.entrypoints=websecure"
+      - "traefik.http.routers.archivebox.tls=true"
+      - "traefik.http.routers.archivebox.tls.certresolver=le"
+      - "traefik.http.services.archivebox.loadbalancer.server.port=8000"
 
   archivebox-webhook:
     build: ./archivebox-webhook
@@ -94,3 +122,7 @@ volumes:
   linkwarden_meili:
   linkwarden_data:
   archivebox_data:
+
+networks:
+  traefik:
+    external: true
