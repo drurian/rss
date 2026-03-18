@@ -31,14 +31,14 @@ services:
       - ./data/miniflux:/var/lib/miniflux
     networks:
       - default
-      - traefik
+      - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
+      - "traefik.docker.network=proxy"
       - "traefik.http.routers.miniflux.rule=Host(`rss.astribelli.com`)"
       - "traefik.http.routers.miniflux.entrypoints=websecure"
       - "traefik.http.routers.miniflux.tls=true"
-      - "traefik.http.routers.miniflux.tls.certresolver=le"
+      - "traefik.http.routers.miniflux.tls.certresolver=letsencrypt"
       - "traefik.http.services.miniflux.loadbalancer.server.port=8080"
 
   linkwarden-db:
@@ -72,14 +72,14 @@ services:
       - linkwarden_data:/data/data
     networks:
       - default
-      - traefik
+      - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
+      - "traefik.docker.network=proxy"
       - "traefik.http.routers.linkwarden.rule=Host(`links.astribelli.com`)"
       - "traefik.http.routers.linkwarden.entrypoints=websecure"
       - "traefik.http.routers.linkwarden.tls=true"
-      - "traefik.http.routers.linkwarden.tls.certresolver=le"
+      - "traefik.http.routers.linkwarden.tls.certresolver=letsencrypt"
       - "traefik.http.services.linkwarden.loadbalancer.server.port=3000"
 
   archivebox:
@@ -93,14 +93,14 @@ services:
     command: server --quick-init 0.0.0.0:8000
     networks:
       - default
-      - traefik
+      - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
+      - "traefik.docker.network=proxy"
       - "traefik.http.routers.archivebox.rule=Host(`archive.astribelli.com`)"
       - "traefik.http.routers.archivebox.entrypoints=websecure"
       - "traefik.http.routers.archivebox.tls=true"
-      - "traefik.http.routers.archivebox.tls.certresolver=le"
+      - "traefik.http.routers.archivebox.tls.certresolver=letsencrypt"
       - "traefik.http.services.archivebox.loadbalancer.server.port=8000"
 
   archivebox-webhook:
@@ -124,5 +124,5 @@ volumes:
   archivebox_data:
 
 networks:
-  traefik:
+  proxy:
     external: true
