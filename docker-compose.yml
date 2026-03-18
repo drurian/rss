@@ -84,9 +84,8 @@ services:
       - "8090:8090"
     environment:
       MINIFLUX_WEBHOOK_SECRET: ${MINIFLUX_WEBHOOK_SECRET}
-      ARCHIVEBOX_DATA_DIR: /archivebox-data
+      ARCHIVEBOX_CONTAINER_NAME: ${ARCHIVEBOX_CONTAINER_NAME}
     volumes:
-      - archivebox_data:/archivebox-data
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:

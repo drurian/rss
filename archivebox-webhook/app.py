@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import os
+import shlex
 import subprocess
 
 from flask import Flask, abort, jsonify, request
@@ -8,17 +9,19 @@ from flask import Flask, abort, jsonify, request
 app = Flask(__name__)
 
 SECRET = os.environ.get("MINIFLUX_WEBHOOK_SECRET", "")
-ARCHIVEBOX_DATA_DIR = os.environ.get("ARCHIVEBOX_DATA_DIR", "/archivebox-data")
+ARCHIVEBOX_CONTAINER_NAME = os.environ.get("ARCHIVEBOX_CONTAINER_NAME", "rss-archivebox-1")
 
 
 def is_valid_signature(raw_body: bytes, provided_signature: str) -> bool:
     if not SECRET:
         return False
+
     expected_signature = hmac.new(
         SECRET.encode("utf-8"),
         raw_body,
         hashlib.sha256,
     ).hexdigest()
+
     return hmac.compare_digest(expected_signature, provided_signature or "")
 
 
@@ -26,9 +29,9 @@ def extract_url(payload: dict) -> str | None:
     if not isinstance(payload, dict):
         return None
 
-    # Be tolerant about payload shape.
-    if isinstance(payload.get("entry"), dict):
-        return payload["entry"].get("url")
+    entry = payload.get("entry")
+    if isinstance(entry, dict):
+        return entry.get("url")
 
     entries = payload.get("entries")
     if isinstance(entries, list) and entries:
@@ -59,30 +62,31 @@ def miniflux_archivebox():
 
     cmd = [
         "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{ARCHIVEBOX_DATA_DIR}:/data",
-        "archivebox/archivebox:stable",
-        "add",
-        url,
+        "exec",
+        "--user=archivebox",
+        ARCHIVEBOX_CONTAINER_NAME,
+        "/bin/bash",
+        "-lc",
+        f"archivebox add {shlex.quote(url)}",
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
+        app.logger.error("archivebox add failed: %s", result.stderr[-2000:])
         return (
             jsonify(
                 {
                     "status": "error",
                     "url": url,
                     "returncode": result.returncode,
-                    "stderr": result.stderr[-4000:],
+                    "stderr": result.stderr[-2000:],
                 }
             ),
             500,
         )
 
+    app.logger.info("archived url=%s", url)
     return jsonify({"status": "archived", "url": url}), 200
 
 
