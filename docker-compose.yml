@@ -34,7 +34,7 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
+      - "traefik.docker.network=pokemoncollector_proxy"
       - "traefik.http.routers.miniflux.rule=Host(`rss.astribelli.com`)"
       - "traefik.http.routers.miniflux.entrypoints=websecure"
       - "traefik.http.routers.miniflux.tls=true"
@@ -75,7 +75,7 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
+      - "traefik.docker.network=pokemoncollector_proxy"
       - "traefik.http.routers.linkwarden.rule=Host(`links.astribelli.com`)"
       - "traefik.http.routers.linkwarden.entrypoints=websecure"
       - "traefik.http.routers.linkwarden.tls=true"
@@ -96,7 +96,7 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
+      - "traefik.docker.network=pokemoncollector_proxy"
       - "traefik.http.routers.archivebox.rule=Host(`archive.astribelli.com`)"
       - "traefik.http.routers.archivebox.entrypoints=websecure"
       - "traefik.http.routers.archivebox.tls=true"
@@ -126,3 +126,4 @@ volumes:
 networks:
   proxy:
     external: true
+    name: pokemoncollector_proxy
