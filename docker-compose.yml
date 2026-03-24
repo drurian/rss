@@ -42,7 +42,7 @@ services:
       - "traefik.http.services.miniflux.loadbalancer.server.port=8080"
 
   miniflux_ai:
-    image: ghcr.io/qetesh/miniflux-ai:v0.9.3
+    image: ghcr.io/qetesh/miniflux-ai:latest
     restart: unless-stopped
     depends_on:
       - miniflux

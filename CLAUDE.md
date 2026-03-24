@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Docker Compose stack for self-hosted RSS reading, AI summaries, bookmark management, and web archiving. The services are:
 
 - **Miniflux** (v2.2.16) — RSS feed reader (port 8080)
-- **miniflux-ai** (v0.9.3) — Companion service that polls Miniflux and writes AI-generated summaries back into entry content
+- **miniflux-ai** — Companion service that polls Miniflux and writes AI-generated summaries back into entry content
 - **Linkwarden** (v2.13.5) — Bookmark manager with Meilisearch full-text search (port 3000)
 - **ArchiveBox** — Web page archiver (port 8000)
 - **archivebox-webhook** — Custom Flask/Gunicorn microservice that receives Miniflux webhook events and archives URLs into ArchiveBox (port 8090)
