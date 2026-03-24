@@ -4,6 +4,14 @@ import requests
 from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
+app.config["TRUSTED_HOSTS"] = [
+    "openrouter_fallback_proxy",
+    "openrouter_fallback_proxy:8081",
+    "127.0.0.1",
+    "127.0.0.1:8081",
+    "localhost",
+    "localhost:8081",
+]
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_API_URL = os.environ.get(
