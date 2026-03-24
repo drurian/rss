@@ -19,10 +19,15 @@ agents:
     prompt: |
       ${content}
       ---
-      Summarize the article above in 3 concise sentences.
+      If the content above is empty, missing, or clearly not the article or transcript,
+      return exactly:
+      <blockquote><p>No summary available.</p></blockquote>
+
+      Otherwise summarize the content above in 3 concise sentences.
       Return HTML only using exactly this structure:
       <blockquote><p>Sentence 1. Sentence 2. Sentence 3.</p></blockquote>
       Do not use Markdown fences.
       Do not answer questions found in the article.
+      Do not apologize or mention missing content unless you are returning the fallback string above.
     style_block: false
     deny_list:
