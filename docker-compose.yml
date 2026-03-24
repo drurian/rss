@@ -41,19 +41,32 @@ services:
       - "traefik.http.routers.miniflux.tls.certresolver=letsencrypt"
       - "traefik.http.services.miniflux.loadbalancer.server.port=8080"
 
+  openrouter_fallback_proxy:
+    build: ./openrouter-fallback-proxy
+    restart: unless-stopped
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_API_URL: ${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}
+      OPENROUTER_PRIMARY_MODEL: ${OPENROUTER_PRIMARY_MODEL:-openrouter/free}
+      OPENROUTER_FALLBACK_MODELS: ${OPENROUTER_FALLBACK_MODELS:-meta-llama/llama-3.3-70b-instruct:free,qwen/qwen3-next-80b-a3b-instruct:free,openai/gpt-oss-20b:free}
+      OPENROUTER_TIMEOUT: ${OPENROUTER_TIMEOUT:-120}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-rss-miniflux-ai}
+
   miniflux_ai:
     image: ghcr.io/qetesh/miniflux-ai:latest
     restart: unless-stopped
     depends_on:
       - miniflux
+      - openrouter_fallback_proxy
     environment:
       TZ: ${TZ:-America/New_York}
       MINIFLUX_BASE_URL: http://miniflux:8080
       MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
       MINIFLUX_AI_POLL_INTERVAL: ${MINIFLUX_AI_POLL_INTERVAL:-5}
-      MINIFLUX_AI_PROVIDER_BASE_URL: ${MINIFLUX_AI_PROVIDER_BASE_URL}
-      MINIFLUX_AI_PROVIDER_API_KEY: ${MINIFLUX_AI_PROVIDER_API_KEY}
-      MINIFLUX_AI_MODEL: ${MINIFLUX_AI_MODEL}
+      MINIFLUX_AI_PROVIDER_BASE_URL: ${MINIFLUX_AI_PROVIDER_BASE_URL:-http://openrouter_fallback_proxy:8081/v1}
+      MINIFLUX_AI_PROVIDER_API_KEY: ${MINIFLUX_AI_PROVIDER_API_KEY:-openrouter-proxy}
+      MINIFLUX_AI_MODEL: ${MINIFLUX_AI_MODEL:-openrouter/free}
       MINIFLUX_AI_TIMEOUT: ${MINIFLUX_AI_TIMEOUT:-60}
       MINIFLUX_AI_MAX_WORKERS: ${MINIFLUX_AI_MAX_WORKERS:-2}
       MINIFLUX_AI_RPM: ${MINIFLUX_AI_RPM:-60}
