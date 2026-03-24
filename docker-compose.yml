@@ -52,6 +52,10 @@ services:
       OPENROUTER_TIMEOUT: ${OPENROUTER_TIMEOUT:-120}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
       OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-rss-miniflux-ai}
+    networks:
+      default:
+        aliases:
+          - openrouter-fallback-proxy
     healthcheck:
       test:
         [
@@ -77,7 +81,7 @@ services:
       MINIFLUX_BASE_URL: http://miniflux:8080
       MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
       MINIFLUX_AI_POLL_INTERVAL: ${MINIFLUX_AI_POLL_INTERVAL:-5}
-      MINIFLUX_AI_PROVIDER_BASE_URL: ${MINIFLUX_AI_PROVIDER_BASE_URL:-http://openrouter_fallback_proxy:8081/v1}
+      MINIFLUX_AI_PROVIDER_BASE_URL: ${MINIFLUX_AI_PROVIDER_BASE_URL:-http://openrouter-fallback-proxy:8081/v1}
       MINIFLUX_AI_PROVIDER_API_KEY: ${MINIFLUX_AI_PROVIDER_API_KEY:-openrouter-proxy}
       MINIFLUX_AI_MODEL: ${MINIFLUX_AI_MODEL:-openrouter/free}
       MINIFLUX_AI_TIMEOUT: ${MINIFLUX_AI_TIMEOUT:-60}

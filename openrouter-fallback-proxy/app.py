@@ -5,8 +5,8 @@ from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
 app.config["TRUSTED_HOSTS"] = [
-    "openrouter_fallback_proxy",
-    "openrouter_fallback_proxy:8081",
+    "openrouter-fallback-proxy",
+    "openrouter-fallback-proxy:8081",
     "127.0.0.1",
     "127.0.0.1:8081",
     "localhost",
