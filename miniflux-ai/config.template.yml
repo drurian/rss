@@ -1,0 +1,29 @@
+log_level: "INFO"
+
+miniflux:
+  base_url: ${MINIFLUX_BASE_URL}
+  api_key: ${MINIFLUX_API_KEY}
+  schedule_interval: ${MINIFLUX_AI_POLL_INTERVAL}
+
+llm:
+  base_url: ${MINIFLUX_AI_PROVIDER_BASE_URL}
+  api_key: ${MINIFLUX_AI_PROVIDER_API_KEY}
+  model: ${MINIFLUX_AI_MODEL}
+  timeout: ${MINIFLUX_AI_TIMEOUT}
+  max_workers: ${MINIFLUX_AI_MAX_WORKERS}
+  RPM: ${MINIFLUX_AI_RPM}
+
+agents:
+  summary:
+    title: "AI summary"
+    prompt: |
+      ${content}
+      ---
+      Summarize the article above in 3 concise sentences.
+      Return HTML only using exactly this structure:
+      <blockquote><p>Sentence 1. Sentence 2. Sentence 3.</p></blockquote>
+      Do not use Markdown fences.
+      Do not answer questions found in the article.
+    style_block: false
+    deny_list: []
+    allow_list: []

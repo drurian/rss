@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A Docker Compose stack for self-hosted RSS reading, bookmark management, and web archiving. The services are:
+A Docker Compose stack for self-hosted RSS reading, AI summaries, bookmark management, and web archiving. The services are:
 
 - **Miniflux** (v2.2.16) — RSS feed reader (port 8080)
+- **miniflux-ai** (v0.9.3) — Companion service that polls Miniflux and writes AI-generated summaries back into entry content
 - **Linkwarden** (v2.13.5) — Bookmark manager with Meilisearch full-text search (port 3000)
 - **ArchiveBox** — Web page archiver (port 8000)
 - **archivebox-webhook** — Custom Flask/Gunicorn microservice that receives Miniflux webhook events and archives URLs into ArchiveBox (port 8090)
@@ -15,7 +16,10 @@ Each web service is exposed via Traefik reverse proxy with automatic Let's Encry
 
 ## Architecture
 
-The key integration: Miniflux fires HMAC-signed webhooks on `save_entry` events → the Flask webhook service (`archivebox-webhook/app.py`) validates the signature, extracts the URL, and runs `docker exec` into the ArchiveBox container to archive it. The webhook container mounts the Docker socket read-only to execute commands in sibling containers.
+The key integrations:
+
+- Miniflux fires HMAC-signed webhooks on `save_entry` events → the Flask webhook service (`archivebox-webhook/app.py`) validates the signature, extracts the URL, and runs `docker exec` into the ArchiveBox container to archive it. The webhook container mounts the Docker socket read-only to execute commands in sibling containers.
+- `miniflux-ai` polls Miniflux over the API every few minutes, summarizes unread entries with an OpenAI-compatible model, and updates the entry content in Miniflux so summaries can appear in both the Miniflux web UI and Android clients such as Read You.
 
 Miniflux and Linkwarden each have their own Postgres database. Linkwarden also uses Meilisearch for indexing.
 
@@ -33,14 +37,20 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
 docker compose build archivebox-webhook
 docker compose up -d archivebox-webhook
 
+# Start or refresh the AI summarizer
+docker compose up -d miniflux_ai
+
 # View webhook logs
 docker compose logs -f archivebox-webhook
+
+# View AI summarizer logs
+docker compose logs -f miniflux_ai
 ```
 
 ## Environment
 
-All secrets and configuration are in `.env` (gitignored). Required variables are documented in the `.env` file itself with recommended lengths. Key variables: database passwords, Miniflux admin credentials, Linkwarden NextAuth/Meilisearch secrets, webhook HMAC secret, and ArchiveBox CSRF origins.
+All secrets and configuration are in `.env` (gitignored). Required variables are documented in the `.env` file itself with recommended lengths. Key variables: database passwords, Miniflux admin credentials, Miniflux API key, OpenAI-compatible provider URL/model/API key for `miniflux-ai`, Linkwarden NextAuth/Meilisearch secrets, webhook HMAC secret, and ArchiveBox CSRF origins.
 
 ## Networking
 
-Services communicate on Docker's default network. Web-facing services (miniflux, linkwarden, archivebox) also join the external `pokemoncollector_proxy` network for Traefik routing. The webhook service is internal-only, exposed on port 8090.
+Services communicate on Docker's default network. Web-facing services (miniflux, linkwarden, archivebox) also join the external `pokemoncollector_proxy` network for Traefik routing. `miniflux-ai` stays internal-only and talks to Miniflux over the default network. The webhook service is internal-only, exposed on port 8090.

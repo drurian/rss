@@ -41,6 +41,28 @@ services:
       - "traefik.http.routers.miniflux.tls.certresolver=letsencrypt"
       - "traefik.http.services.miniflux.loadbalancer.server.port=8080"
 
+  miniflux_ai:
+    image: ghcr.io/qetesh/miniflux-ai:v0.9.3
+    restart: unless-stopped
+    depends_on:
+      - miniflux
+    environment:
+      TZ: ${TZ:-America/New_York}
+      MINIFLUX_BASE_URL: http://miniflux:8080
+      MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
+      MINIFLUX_AI_POLL_INTERVAL: ${MINIFLUX_AI_POLL_INTERVAL:-5}
+      MINIFLUX_AI_PROVIDER_BASE_URL: ${MINIFLUX_AI_PROVIDER_BASE_URL}
+      MINIFLUX_AI_PROVIDER_API_KEY: ${MINIFLUX_AI_PROVIDER_API_KEY}
+      MINIFLUX_AI_MODEL: ${MINIFLUX_AI_MODEL}
+      MINIFLUX_AI_TIMEOUT: ${MINIFLUX_AI_TIMEOUT:-60}
+      MINIFLUX_AI_MAX_WORKERS: ${MINIFLUX_AI_MAX_WORKERS:-2}
+      MINIFLUX_AI_RPM: ${MINIFLUX_AI_RPM:-60}
+    volumes:
+      - ./miniflux-ai/config.template.yml:/app/config.template.yml:ro
+      - ./miniflux-ai/bootstrap_config.py:/app/bootstrap_config.py:ro
+      - ./miniflux-ai/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
+    command: ["/bin/sh", "/app/docker-entrypoint.sh"]
+
   linkwarden-db:
     image: postgres:16-alpine
     restart: unless-stopped
