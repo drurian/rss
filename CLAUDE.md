@@ -22,6 +22,7 @@ The key integrations:
 - Miniflux fires HMAC-signed webhooks on `save_entry` events → the Flask webhook service (`archivebox-webhook/app.py`) validates the signature, extracts the URL, and runs `docker exec` into the ArchiveBox container to archive it. The webhook container mounts the Docker socket read-only to execute commands in sibling containers.
 - `miniflux-ai` polls Miniflux over the API every few minutes, summarizes unread entries, and updates the entry content in Miniflux so summaries can appear in both the Miniflux web UI and Android clients such as Read You.
 - `openrouter-fallback-proxy` sits in front of OpenRouter's OpenAI-compatible API so `miniflux-ai` can keep using a single OpenAI client while still sending requests through OpenRouter's free-model router with explicit fallback models.
+- The compose defaults are intentionally conservative for free-model usage: `miniflux-ai` defaults to one worker and one request per minute unless overridden in `.env`.
 
 Miniflux and Linkwarden each have their own Postgres database. Linkwarden also uses Meilisearch for indexing.
 

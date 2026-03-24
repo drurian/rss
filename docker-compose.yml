@@ -52,13 +52,26 @@ services:
       OPENROUTER_TIMEOUT: ${OPENROUTER_TIMEOUT:-120}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
       OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-rss-miniflux-ai}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=5).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   miniflux_ai:
     image: ghcr.io/qetesh/miniflux-ai:latest
     restart: unless-stopped
     depends_on:
-      - miniflux
-      - openrouter_fallback_proxy
+      miniflux:
+        condition: service_started
+      openrouter_fallback_proxy:
+        condition: service_healthy
     environment:
       TZ: ${TZ:-America/New_York}
       MINIFLUX_BASE_URL: http://miniflux:8080
@@ -68,8 +81,8 @@ services:
       MINIFLUX_AI_PROVIDER_API_KEY: ${MINIFLUX_AI_PROVIDER_API_KEY:-openrouter-proxy}
       MINIFLUX_AI_MODEL: ${MINIFLUX_AI_MODEL:-openrouter/free}
       MINIFLUX_AI_TIMEOUT: ${MINIFLUX_AI_TIMEOUT:-60}
-      MINIFLUX_AI_MAX_WORKERS: ${MINIFLUX_AI_MAX_WORKERS:-2}
-      MINIFLUX_AI_RPM: ${MINIFLUX_AI_RPM:-60}
+      MINIFLUX_AI_MAX_WORKERS: ${MINIFLUX_AI_MAX_WORKERS:-1}
+      MINIFLUX_AI_RPM: ${MINIFLUX_AI_RPM:-1}
     volumes:
       - ./miniflux-ai/config.template.yml:/app/config.template.yml:ro
       - ./miniflux-ai/bootstrap_config.py:/app/bootstrap_config.py:ro

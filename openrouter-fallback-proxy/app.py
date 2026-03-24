@@ -14,6 +14,30 @@ OPENROUTER_PRIMARY_MODEL = os.environ.get("OPENROUTER_PRIMARY_MODEL", "openroute
 OPENROUTER_TIMEOUT = float(os.environ.get("OPENROUTER_TIMEOUT", "120"))
 OPENROUTER_SITE_URL = os.environ.get("OPENROUTER_SITE_URL", "").strip()
 OPENROUTER_APP_NAME = os.environ.get("OPENROUTER_APP_NAME", "rss-miniflux-ai").strip()
+PLACEHOLDER_VALUE_MARKERS = (
+    "replace-me",
+    "changeme",
+    "your-",
+    "example",
+    "placeholder",
+)
+
+
+def is_missing_or_placeholder(value: str) -> bool:
+    normalized = value.strip()
+    if not normalized:
+        return True
+
+    lowered = normalized.lower()
+    return any(marker in lowered for marker in PLACEHOLDER_VALUE_MARKERS)
+
+
+def validate_settings() -> None:
+    if is_missing_or_placeholder(OPENROUTER_API_KEY):
+        raise RuntimeError("OPENROUTER_API_KEY must be set to a real OpenRouter API key")
+
+
+validate_settings()
 
 
 def parse_fallback_models() -> list[str]:
