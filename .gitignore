@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Local Docker / app data
+data/
+archivebox_data/
+linkwarden_data/
+miniflux_db/
+linkwarden_pg/
+linkwarden_meili/
+
+# Optional local overrides
+docker-compose.override.yml
+compose.override.yml
