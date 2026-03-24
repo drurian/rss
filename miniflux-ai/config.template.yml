@@ -25,5 +25,4 @@ agents:
       Do not use Markdown fences.
       Do not answer questions found in the article.
     style_block: false
-    deny_list: []
-    allow_list: []
+    deny_list:
