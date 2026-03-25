@@ -43,6 +43,9 @@ YOUTUBE_NO_TRANSCRIPT_DAYS = int(os.environ.get("YT_TRANSCRIPT_NEGATIVE_CACHE_DA
 YOUTUBE_BLOCK_COOLDOWN_HOURS = int(os.environ.get("YT_TRANSCRIPT_GLOBAL_BLOCK_COOLDOWN_HOURS", "6"))
 ARTICLE_MAX_CHARS = int(os.environ.get("ENTRY_SUMMARIZER_MAX_ARTICLE_CHARS", "20000"))
 TRANSCRIPT_MAX_CHARS = int(os.environ.get("ENTRY_SUMMARIZER_MAX_TRANSCRIPT_CHARS", "48000"))
+SUMMARY_MARKER_RE = re.compile(
+    r"<!-- entry-summarizer:start source:(?P<source>[^\s>]+) hash:(?P<hash>[^\s>]+)(?: video:(?P<video_id>[^\s>]+))? -->"
+)
 
 
 def get_env(name: str, default: str | None = None) -> str:
@@ -92,6 +95,13 @@ def strip_our_summary(value: str) -> str:
         "",
         value,
     ).strip()
+
+
+def extract_summary_marker(value: str) -> dict[str, str] | None:
+    match = SUMMARY_MARKER_RE.search(value)
+    if not match:
+        return None
+    return {key: found for key, found in match.groupdict(default="").items() if found}
 
 
 def clamp_text(value: str, max_chars: int) -> str:
@@ -320,6 +330,39 @@ class StateStore:
         ).fetchone()
         return str_to_dt(row["value"]) if row else None
 
+    def list_states(self, source_type: str | None = None) -> list[StateRecord]:
+        if source_type:
+            rows = self.conn.execute(
+                "SELECT * FROM processing_state WHERE source_type = ? ORDER BY entry_id ASC",
+                (source_type,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM processing_state ORDER BY entry_id ASC"
+            ).fetchall()
+
+        return [
+            StateRecord(
+                entry_id=row["entry_id"],
+                url=row["url"],
+                source_type=row["source_type"],
+                video_id=row["video_id"],
+                status=row["status"],
+                source_hash=row["source_hash"],
+                summary_hash=row["summary_hash"],
+                transcript_hash=row["transcript_hash"],
+                last_attempt_at=str_to_dt(row["last_attempt_at"]),
+                next_retry_at=str_to_dt(row["next_retry_at"]),
+                retry_count=row["retry_count"],
+                last_error=row["last_error"],
+            )
+            for row in rows
+        ]
+
+    def delete_state(self, entry_id: int) -> None:
+        self.conn.execute("DELETE FROM processing_state WHERE entry_id = ?", (entry_id,))
+        self.conn.commit()
+
     def set_runtime(self, key: str, value: datetime | None) -> None:
         if value is None:
             self.conn.execute("DELETE FROM runtime_state WHERE key = ?", (key,))
@@ -353,6 +396,14 @@ class MinifluxClient:
         response.raise_for_status()
         payload = response.json()
         return payload.get("entries", [])
+
+    def entry(self, entry_id: int) -> dict[str, Any]:
+        response = self.session.get(
+            f"{self.base_url}/v1/entries/{entry_id}",
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
 
     def update_entry(self, entry_id: int, content: str) -> None:
         response = self.session.put(
@@ -435,6 +486,7 @@ class EntrySummarizer:
         self.poll_interval = int(get_env("ENTRY_SUMMARIZER_POLL_INTERVAL", "300"))
         self.youtube_interval = int(get_env("YT_TRANSCRIPT_FETCH_INTERVAL_SECONDS", "600"))
         self.llm_interval = max(1, int(60 / max(int(get_env("ENTRY_SUMMARIZER_MAX_ARTICLE_RPM", "1")), 1)))
+        self.command = get_env("ENTRY_SUMMARIZER_COMMAND", "run").lower().replace("_", "-")
         self.state = StateStore(get_env("ENTRY_SUMMARIZER_STATE_PATH", "/data/entry_summarizer.db"))
         self.miniflux = MinifluxClient(miniflux_base_url.rstrip("/"), miniflux_api_key)
         self.llm = LLMClient(llm_base_url, llm_api_key, llm_model, int(get_env("ENTRY_SUMMARIZER_LLM_TIMEOUT", "120")))
@@ -444,6 +496,12 @@ class EntrySummarizer:
     def run(self) -> None:
         self.miniflux.ping()
         logger.info("Connected to Miniflux")
+
+        if self.command == "purge-articles":
+            self.purge_article_summaries()
+            return
+        if self.command != "run":
+            raise SystemExit(f"Unsupported ENTRY_SUMMARIZER_COMMAND: {self.command}")
 
         while True:
             started_at = time.monotonic()
@@ -456,6 +514,55 @@ class EntrySummarizer:
             sleep_for = max(1, self.poll_interval - int(elapsed))
             logger.info("cycle complete sleep_seconds=%s", sleep_for)
             time.sleep(sleep_for)
+
+    def purge_article_summaries(self) -> None:
+        article_states = self.state.list_states("article")
+        removed = 0
+        unchanged = 0
+        missing = 0
+
+        logger.info("purging article summaries tracked_entries=%s", len(article_states))
+        for state in article_states:
+            try:
+                entry = self.miniflux.entry(state.entry_id)
+            except requests.HTTPError as exc:
+                response = exc.response
+                if response is not None and response.status_code == 404:
+                    self.state.delete_state(state.entry_id)
+                    missing += 1
+                    logger.info("purge skipped missing entry_id=%s", state.entry_id)
+                    continue
+                raise
+
+            current_content = str(entry.get("content") or "")
+            stripped = strip_our_summary(current_content)
+            if stripped != current_content.strip():
+                self.miniflux.update_entry(state.entry_id, stripped)
+                removed += 1
+            else:
+                unchanged += 1
+
+            source_hash = sha256_text(clamp_text(html_to_text(stripped), ARTICLE_MAX_CHARS)) if stripped else None
+            self.state.upsert_state(
+                entry_id=state.entry_id,
+                url=state.url,
+                source_type="article",
+                video_id=None,
+                status="purged",
+                source_hash=source_hash,
+                summary_hash=None,
+                transcript_hash=None,
+                next_retry_at=None,
+                retry_count=0,
+                last_error="article summary purged",
+            )
+
+        logger.info(
+            "purge complete removed=%s unchanged=%s missing=%s",
+            removed,
+            unchanged,
+            missing,
+        )
 
     def process_cycle(self) -> None:
         entries = self.miniflux.unread_entries()
@@ -498,7 +605,9 @@ class EntrySummarizer:
         if last_llm and now < last_llm + timedelta(seconds=self.llm_interval):
             return False
 
-        current_content = strip_our_summary(str(entry.get("content") or ""))
+        raw_content = str(entry.get("content") or "")
+        existing_marker = extract_summary_marker(raw_content)
+        current_content = strip_our_summary(raw_content)
         current_text = clamp_text(html_to_text(current_content), ARTICLE_MAX_CHARS)
 
         if source_type == "youtube":
@@ -523,6 +632,25 @@ class EntrySummarizer:
                 "article content missing or too short",
                 hours=ARTICLE_RETRY_BASE_HOURS,
             )
+            return False
+        source_hash = sha256_text(current_text)
+        if current_state and current_state.status == "purged" and current_state.source_hash == source_hash:
+            return False
+        if existing_marker and existing_marker.get("source") == "article" and existing_marker.get("hash") == source_hash:
+            if not current_state or current_state.status != "done" or current_state.source_hash != source_hash:
+                self.state.upsert_state(
+                    entry_id=entry_id,
+                    url=url,
+                    source_type="article",
+                    video_id=None,
+                    status="done",
+                    source_hash=source_hash,
+                    summary_hash=current_state.summary_hash if current_state else None,
+                    transcript_hash=None,
+                    next_retry_at=None,
+                    retry_count=0,
+                    last_error="detected existing article summary marker",
+                )
             return False
         return self.summarize_article_entry(entry, current_state, current_text)
 

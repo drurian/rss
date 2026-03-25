@@ -45,6 +45,9 @@ docker compose up -d archivebox-webhook
 # Start or refresh the active summarizer
 docker compose --profile summaries up -d entry_summarizer
 
+# Purge tracked non-YouTube summaries and keep them suppressed until the article body changes
+docker compose --profile summaries run --rm -e ENTRY_SUMMARIZER_COMMAND=purge-articles entry_summarizer
+
 # Start or refresh the internal LLM proxy
 docker compose up -d openrouter_fallback_proxy
 
@@ -63,7 +66,7 @@ docker compose logs -f openrouter_fallback_proxy
 
 ## Environment
 
-All secrets and configuration are in `.env` (gitignored). Required variables are documented in the `.env` file itself with recommended lengths. Key variables: database passwords, Miniflux admin credentials, Miniflux API key, a Groq or `LLM_PROXY_*` API key for the fallback proxy, the proxy primary/fallback model list, the internal provider URL/model/API key used by `entry-summarizer`, the YouTube transcript pacing/backoff settings, Linkwarden NextAuth/Meilisearch secrets, webhook HMAC secret, and ArchiveBox CSRF origins.
+All secrets and configuration are in `.env` (gitignored). Required variables are documented in the `.env` file itself with recommended lengths. Key variables: database passwords, Miniflux admin credentials, Miniflux API key, a Groq or `LLM_PROXY_*` API key for the fallback proxy, the proxy primary/fallback model list, the internal provider URL/model/API key used by `entry-summarizer`, `ENTRY_SUMMARIZER_COMMAND` for one-shot maintenance tasks such as purging article summaries, the YouTube transcript pacing/backoff settings, Linkwarden NextAuth/Meilisearch secrets, webhook HMAC secret, and ArchiveBox CSRF origins.
 
 ## Networking
 
