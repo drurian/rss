@@ -359,6 +359,32 @@ class StateStore:
             for row in rows
         ]
 
+    def list_states_for_sources(self, source_types: list[str]) -> list[StateRecord]:
+        if not source_types:
+            return []
+        placeholders = ",".join("?" for _ in source_types)
+        rows = self.conn.execute(
+            f"SELECT * FROM processing_state WHERE source_type IN ({placeholders}) ORDER BY entry_id ASC",
+            tuple(source_types),
+        ).fetchall()
+        return [
+            StateRecord(
+                entry_id=row["entry_id"],
+                url=row["url"],
+                source_type=row["source_type"],
+                video_id=row["video_id"],
+                status=row["status"],
+                source_hash=row["source_hash"],
+                summary_hash=row["summary_hash"],
+                transcript_hash=row["transcript_hash"],
+                last_attempt_at=str_to_dt(row["last_attempt_at"]),
+                next_retry_at=str_to_dt(row["next_retry_at"]),
+                retry_count=row["retry_count"],
+                last_error=row["last_error"],
+            )
+            for row in rows
+        ]
+
     def delete_state(self, entry_id: int) -> None:
         self.conn.execute("DELETE FROM processing_state WHERE entry_id = ?", (entry_id,))
         self.conn.commit()
@@ -487,11 +513,14 @@ class EntrySummarizer:
         self.youtube_interval = int(get_env("YT_TRANSCRIPT_FETCH_INTERVAL_SECONDS", "600"))
         self.llm_interval = max(1, int(60 / max(int(get_env("ENTRY_SUMMARIZER_MAX_ARTICLE_RPM", "1")), 1)))
         self.command = get_env("ENTRY_SUMMARIZER_COMMAND", "run").lower().replace("_", "-")
+        self.youtube_mode = get_env("YT_SUMMARIZATION_MODE", "transcript").lower()
         self.state = StateStore(get_env("ENTRY_SUMMARIZER_STATE_PATH", "/data/entry_summarizer.db"))
         self.miniflux = MinifluxClient(miniflux_base_url.rstrip("/"), miniflux_api_key)
         self.llm = LLMClient(llm_base_url, llm_api_key, llm_model, int(get_env("ENTRY_SUMMARIZER_LLM_TIMEOUT", "120")))
-        languages = [item.strip() for item in get_env("YT_TRANSCRIPT_LANGUAGES", "en,en-US").split(",") if item.strip()]
-        self.youtube = YouTubeTranscriptFetcher(languages, get_env("YT_TRANSCRIPT_PROXY_URL") or None)
+        self.youtube: YouTubeTranscriptFetcher | None = None
+        if self.youtube_mode == "transcript":
+            languages = [item.strip() for item in get_env("YT_TRANSCRIPT_LANGUAGES", "en,en-US").split(",") if item.strip()]
+            self.youtube = YouTubeTranscriptFetcher(languages, get_env("YT_TRANSCRIPT_PROXY_URL") or None)
 
     def run(self) -> None:
         self.miniflux.ping()
@@ -516,7 +545,7 @@ class EntrySummarizer:
             time.sleep(sleep_for)
 
     def purge_article_summaries(self) -> None:
-        article_states = self.state.list_states("article")
+        article_states = self.state.list_states_for_sources(["article", "youtube"])
         removed = 0
         unchanged = 0
         missing = 0
@@ -598,6 +627,13 @@ class EntrySummarizer:
         current_state = self.state.get_state(entry_id)
         now = now_utc()
 
+        if source_type == "youtube" and self.youtube_mode == "feed":
+            raw_content = str(entry.get("content") or "")
+            existing_marker = extract_summary_marker(raw_content)
+            current_content = strip_our_summary(raw_content)
+            current_text = clamp_text(html_to_text(current_content), ARTICLE_MAX_CHARS)
+            return self.process_youtube_feed_entry(entry, current_state, video_id, current_text, existing_marker)
+
         if current_state and current_state.next_retry_at and current_state.next_retry_at > now:
             return False
 
@@ -654,6 +690,59 @@ class EntrySummarizer:
             return False
         return self.summarize_article_entry(entry, current_state, current_text)
 
+    def process_youtube_feed_entry(
+        self,
+        entry: dict[str, Any],
+        state: StateRecord | None,
+        video_id: str | None,
+        text: str,
+        existing_marker: dict[str, str] | None,
+    ) -> bool:
+        entry_id = int(entry["id"])
+        url = str(entry.get("url") or "")
+
+        if not is_useful_article_content(text):
+            self.record_retry(
+                entry_id,
+                url,
+                "youtube",
+                video_id,
+                state,
+                "youtube feed content missing or too short",
+                hours=ARTICLE_RETRY_BASE_HOURS,
+            )
+            return False
+
+        source_hash = sha256_text(text)
+        if state and state.status == "done" and state.source_hash == source_hash:
+            return False
+        if existing_marker and existing_marker.get("source") == "youtube-feed" and existing_marker.get("hash") == source_hash:
+            if not state or state.status != "done" or state.source_hash != source_hash:
+                self.state.upsert_state(
+                    entry_id=entry_id,
+                    url=url,
+                    source_type="youtube",
+                    video_id=video_id,
+                    status="done",
+                    source_hash=source_hash,
+                    summary_hash=state.summary_hash if state else None,
+                    transcript_hash=None,
+                    next_retry_at=None,
+                    retry_count=0,
+                    last_error="detected existing youtube feed summary marker",
+                )
+            return False
+
+        return self.summarize_text_entry(
+            entry=entry,
+            state=state,
+            text=text,
+            prompt_source_type="article",
+            marker_source_type="youtube-feed",
+            state_source_type="youtube",
+            video_id=video_id,
+        )
+
     def process_youtube_entry(
         self,
         entry: dict[str, Any],
@@ -663,6 +752,8 @@ class EntrySummarizer:
         entry_id = int(entry["id"])
         url = str(entry.get("url") or "")
         retry_count = state.retry_count if state else 0
+        if self.youtube is None:
+            raise RuntimeError("YouTube transcript mode is disabled")
 
         jitter_sleep(2, 5)
         self.state.set_runtime("youtube_last_fetch_at", now_utc())
@@ -780,27 +871,45 @@ class EntrySummarizer:
             return False
 
     def summarize_article_entry(self, entry: dict[str, Any], state: StateRecord | None, text: str) -> bool:
+        return self.summarize_text_entry(
+            entry=entry,
+            state=state,
+            text=text,
+            prompt_source_type="article",
+            marker_source_type="article",
+            state_source_type="article",
+        )
+
+    def summarize_text_entry(
+        self,
+        *,
+        entry: dict[str, Any],
+        state: StateRecord | None,
+        text: str,
+        prompt_source_type: str,
+        marker_source_type: str,
+        state_source_type: str,
+        video_id: str | None = None,
+    ) -> bool:
         entry_id = int(entry["id"])
         url = str(entry.get("url") or "")
         source_hash = sha256_text(text)
 
-        if state and state.status == "done" and state.source_hash == source_hash:
-            return False
-
         try:
-            summary_html = self.generate_summary("article", entry, text)
+            summary_html = self.generate_summary(prompt_source_type, entry, text)
             content = build_summary_block(
-                "article",
+                marker_source_type,
                 source_hash,
                 summary_html,
                 strip_our_summary(str(entry.get("content") or "")),
+                video_id=video_id,
             )
             self.miniflux.update_entry(entry_id, content)
             self.state.upsert_state(
                 entry_id=entry_id,
                 url=url,
-                source_type="article",
-                video_id=None,
+                source_type=state_source_type,
+                video_id=video_id,
                 status="done",
                 source_hash=source_hash,
                 summary_hash=sha256_text(summary_html),
@@ -809,18 +918,18 @@ class EntrySummarizer:
                 retry_count=0,
                 last_error=None,
             )
-            logger.info("summarized article entry_id=%s", entry_id)
+            logger.info("summarized %s entry_id=%s", marker_source_type, entry_id)
             return True
         except Exception as exc:
             self.record_retry(
                 entry_id,
                 url,
-                "article",
-                None,
+                state_source_type,
+                video_id,
                 state,
                 f"summary failed: {exc}",
             )
-            logger.warning("article summary failed entry_id=%s error=%s", entry_id, exc)
+            logger.warning("%s summary failed entry_id=%s error=%s", marker_source_type, entry_id, exc)
             return False
 
     def generate_summary(self, source_type: str, entry: dict[str, Any], content: str) -> str:

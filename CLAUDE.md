@@ -22,7 +22,7 @@ The key integrations:
 
 - Miniflux fires HMAC-signed webhooks on `save_entry` events → the Flask webhook service (`archivebox-webhook/app.py`) validates the signature, extracts the URL, and runs `docker exec` into the ArchiveBox container to archive it. The webhook container mounts the Docker socket read-only to execute commands in sibling containers.
 - `entry-summarizer` polls Miniflux over the API, writes summaries back into entry content, and keeps durable per-entry state in SQLite so already-processed entries are not retried every poll.
-- For YouTube URLs, `entry-summarizer` fetches captions with `youtube-transcript-api` and summarizes the transcript instead of the RSS entry body. Transcript fetching is intentionally conservative: one fetch worker, one fetch every 10 minutes max by default, 2-5 seconds of jitter per fetch attempt, and persistent cooldown when YouTube blocks the VPS IP.
+- For YouTube URLs, `entry-summarizer` can either fetch captions with `youtube-transcript-api` and summarize the transcript, or skip transcript fetching entirely and summarize the existing RSS entry body instead. `YT_SUMMARIZATION_MODE=transcript` uses the transcript path; `YT_SUMMARIZATION_MODE=feed` pauses transcript fetching and falls back to the standard body summarizer. Transcript fetching is intentionally conservative: one fetch worker, one fetch every 10 minutes max by default, 2-5 seconds of jitter per fetch attempt, and persistent cooldown when YouTube blocks the VPS IP.
 - `openrouter-fallback-proxy` sits in front of the upstream OpenAI-compatible API so the summarizer can keep using a single OpenAI client while the proxy retries sequentially across a configured Groq model fallback list on retryable upstream failures such as `429`.
 - `miniflux-ai` remains available only under the `legacy` Compose profile for rollback. Do not run it alongside `entry-summarizer`; both services write into Miniflux entry content and will race.
 
@@ -66,7 +66,7 @@ docker compose logs -f openrouter_fallback_proxy
 
 ## Environment
 
-All secrets and configuration are in `.env` (gitignored). Required variables are documented in the `.env` file itself with recommended lengths. Key variables: database passwords, Miniflux admin credentials, Miniflux API key, a Groq or `LLM_PROXY_*` API key for the fallback proxy, the proxy primary/fallback model list, the internal provider URL/model/API key used by `entry-summarizer`, `ENTRY_SUMMARIZER_COMMAND` for one-shot maintenance tasks such as purging article summaries, the YouTube transcript pacing/backoff settings, Linkwarden NextAuth/Meilisearch secrets, webhook HMAC secret, and ArchiveBox CSRF origins.
+All secrets and configuration are in `.env` (gitignored). Required variables are documented in the `.env` file itself with recommended lengths. Key variables: database passwords, Miniflux admin credentials, Miniflux API key, a Groq or `LLM_PROXY_*` API key for the fallback proxy, the proxy primary/fallback model list, the internal provider URL/model/API key used by `entry-summarizer`, `ENTRY_SUMMARIZER_COMMAND` for one-shot maintenance tasks such as purging article summaries, `YT_SUMMARIZATION_MODE` plus the YouTube transcript pacing/backoff settings, Linkwarden NextAuth/Meilisearch secrets, webhook HMAC secret, and ArchiveBox CSRF origins.
 
 ## Networking
 
