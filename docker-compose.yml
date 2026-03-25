@@ -80,6 +80,7 @@ services:
       retries: 3
 
   miniflux_ai:
+    profiles: ["legacy"]
     image: ghcr.io/qetesh/miniflux-ai:latest
     restart: unless-stopped
     depends_on:
@@ -103,6 +104,37 @@ services:
       - ./miniflux-ai/bootstrap_config.py:/app/bootstrap_config.py:ro
       - ./miniflux-ai/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
     command: ["/bin/sh", "/app/docker-entrypoint.sh"]
+
+  entry_summarizer:
+    profiles: ["summaries"]
+    build: ./entry-summarizer
+    restart: unless-stopped
+    depends_on:
+      miniflux:
+        condition: service_started
+      openrouter_fallback_proxy:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-America/New_York}
+      MINIFLUX_BASE_URL: http://miniflux:8080
+      MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
+      ENTRY_SUMMARIZER_POLL_INTERVAL: ${ENTRY_SUMMARIZER_POLL_INTERVAL:-300}
+      ENTRY_SUMMARIZER_STATE_PATH: /data/entry_summarizer.db
+      ENTRY_SUMMARIZER_MAX_ARTICLE_RPM: ${ENTRY_SUMMARIZER_MAX_ARTICLE_RPM:-1}
+      ENTRY_SUMMARIZER_LLM_BASE_URL: ${ENTRY_SUMMARIZER_LLM_BASE_URL:-http://openrouter-fallback-proxy:8081/v1}
+      ENTRY_SUMMARIZER_LLM_API_KEY: ${ENTRY_SUMMARIZER_LLM_API_KEY:-proxy}
+      ENTRY_SUMMARIZER_LLM_MODEL: ${ENTRY_SUMMARIZER_LLM_MODEL:-proxy/default}
+      ENTRY_SUMMARIZER_LLM_TIMEOUT: ${ENTRY_SUMMARIZER_LLM_TIMEOUT:-120}
+      ENTRY_SUMMARIZER_MAX_ARTICLE_CHARS: ${ENTRY_SUMMARIZER_MAX_ARTICLE_CHARS:-20000}
+      ENTRY_SUMMARIZER_MAX_TRANSCRIPT_CHARS: ${ENTRY_SUMMARIZER_MAX_TRANSCRIPT_CHARS:-48000}
+      YT_TRANSCRIPT_FETCH_INTERVAL_SECONDS: ${YT_TRANSCRIPT_FETCH_INTERVAL_SECONDS:-600}
+      YT_TRANSCRIPT_LANGUAGES: ${YT_TRANSCRIPT_LANGUAGES:-en,en-US}
+      YT_TRANSCRIPT_PROXY_URL: ${YT_TRANSCRIPT_PROXY_URL:-}
+      YT_TRANSCRIPT_GLOBAL_BLOCK_COOLDOWN_HOURS: ${YT_TRANSCRIPT_GLOBAL_BLOCK_COOLDOWN_HOURS:-6}
+      YT_TRANSCRIPT_NEGATIVE_CACHE_DAYS: ${YT_TRANSCRIPT_NEGATIVE_CACHE_DAYS:-30}
+      ENTRY_SUMMARIZER_LOG_LEVEL: ${ENTRY_SUMMARIZER_LOG_LEVEL:-INFO}
+    volumes:
+      - entry_summarizer_data:/data
 
   linkwarden-db:
     image: postgres:16-alpine
@@ -181,6 +213,7 @@ services:
 
 volumes:
   miniflux_db:
+  entry_summarizer_data:
   linkwarden_pg:
   linkwarden_meili:
   linkwarden_data:
