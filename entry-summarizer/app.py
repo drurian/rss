@@ -44,7 +44,10 @@ YOUTUBE_BLOCK_COOLDOWN_HOURS = int(os.environ.get("YT_TRANSCRIPT_GLOBAL_BLOCK_CO
 ARTICLE_MAX_CHARS = int(os.environ.get("ENTRY_SUMMARIZER_MAX_ARTICLE_CHARS", "20000"))
 TRANSCRIPT_MAX_CHARS = int(os.environ.get("ENTRY_SUMMARIZER_MAX_TRANSCRIPT_CHARS", "48000"))
 SUMMARY_MARKER_RE = re.compile(
-    r"<!-- entry-summarizer:start source:(?P<source>[^\s>]+) hash:(?P<hash>[^\s>]+)(?: video:(?P<video_id>[^\s>]+))? -->"
+    r"""(?is)<p>\s*<a[^>]+href=["']#entry-summarizer:(?P<source>[^:"']+):(?P<hash>[0-9a-f]{64})(?::(?P<video_id>[^"']+))?["'][^>]*>\s*AI Summary\s*</a>\s*</p>"""
+)
+LEGACY_SUMMARY_MARKER_RE = re.compile(
+    r"""<!-- entry-summarizer:start source:(?P<source>[^\s>]+) hash:(?P<hash>[0-9a-f]{64})(?: video:(?P<video_id>[^\s>]+))? -->"""
 )
 
 
@@ -90,15 +93,23 @@ def html_to_text(value: str) -> str:
 
 
 def strip_our_summary(value: str) -> str:
-    return re.sub(
+    stripped = re.sub(
         r"(?s)<!-- entry-summarizer:start.*?<!-- entry-summarizer:end -->\s*(?:<hr\s*/?>\s*)?",
         "",
         value,
-    ).strip()
+    )
+    stripped = re.sub(
+        r"""(?is)<p>\s*<a[^>]+href=["']#entry-summarizer:[^"']+["'][^>]*>\s*AI Summary\s*</a>\s*</p>\s*<blockquote>.*?</blockquote>\s*(?:<hr\s*/?>\s*)?""",
+        "",
+        stripped,
+    )
+    return stripped.strip()
 
 
 def extract_summary_marker(value: str) -> dict[str, str] | None:
     match = SUMMARY_MARKER_RE.search(value)
+    if not match:
+        match = LEGACY_SUMMARY_MARKER_RE.search(value)
     if not match:
         return None
     return {key: found for key, found in match.groupdict(default="").items() if found}
@@ -185,11 +196,12 @@ def build_summary_block(
     original_content: str,
     video_id: str | None = None,
 ) -> str:
-    video_fragment = f" video:{video_id}" if video_id else ""
+    marker = f"#entry-summarizer:{source_type}:{source_hash}"
+    if video_id:
+        marker = f"{marker}:{video_id}"
     injected = (
-        f"<!-- entry-summarizer:start source:{source_type} hash:{source_hash}{video_fragment} -->\n"
-        f"{summary_html}\n"
-        "<!-- entry-summarizer:end -->"
+        f'<p><a href="{marker}">AI Summary</a></p>\n'
+        f"{summary_html}"
     )
     base = original_content.strip()
     return f"{injected}\n<hr />\n{base}" if base else injected
@@ -626,13 +638,37 @@ class EntrySummarizer:
         url = str(entry.get("url") or "")
         current_state = self.state.get_state(entry_id)
         now = now_utc()
+        raw_content = str(entry.get("content") or "")
+        existing_marker = extract_summary_marker(raw_content)
+        current_content = strip_our_summary(raw_content)
+        current_text = clamp_text(html_to_text(current_content), ARTICLE_MAX_CHARS)
 
         if source_type == "youtube" and self.youtube_mode == "feed":
-            raw_content = str(entry.get("content") or "")
-            existing_marker = extract_summary_marker(raw_content)
-            current_content = strip_our_summary(raw_content)
-            current_text = clamp_text(html_to_text(current_content), ARTICLE_MAX_CHARS)
             return self.process_youtube_feed_entry(entry, current_state, video_id, current_text, existing_marker)
+
+        if source_type == "youtube" and existing_marker and existing_marker.get("source") == "youtube-transcript":
+            marker_hash = existing_marker.get("hash")
+            marker_video_id = existing_marker.get("video_id") or video_id
+            if marker_hash:
+                if (
+                    not current_state
+                    or current_state.status != "done"
+                    or current_state.transcript_hash != marker_hash
+                ):
+                    self.state.upsert_state(
+                        entry_id=entry_id,
+                        url=url,
+                        source_type="youtube",
+                        video_id=marker_video_id,
+                        status="done",
+                        source_hash=marker_hash,
+                        summary_hash=current_state.summary_hash if current_state else None,
+                        transcript_hash=marker_hash,
+                        next_retry_at=None,
+                        retry_count=0,
+                        last_error="detected existing youtube transcript summary marker",
+                    )
+                return False
 
         if current_state and current_state.next_retry_at and current_state.next_retry_at > now:
             return False
@@ -640,11 +676,6 @@ class EntrySummarizer:
         last_llm = self.state.get_runtime("last_llm_request_at")
         if last_llm and now < last_llm + timedelta(seconds=self.llm_interval):
             return False
-
-        raw_content = str(entry.get("content") or "")
-        existing_marker = extract_summary_marker(raw_content)
-        current_content = strip_our_summary(raw_content)
-        current_text = clamp_text(html_to_text(current_content), ARTICLE_MAX_CHARS)
 
         if source_type == "youtube":
             if not video_id:
